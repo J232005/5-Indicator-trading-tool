@@ -53,4 +53,5 @@ Type `quit` to exit.
   but prices will reflect the last close.
 - Market structure analysis is intentionally left to the user — review your chart
   alongside every signal before acting.
-- This tool is for paper trading and educational use.
+- This tool is for paper trading and educational use. 
+
