@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from config import (
     EMA_FAST, EMA_SLOW, RSI_PERIOD, ATR_PERIOD,
-    ATR_STOP_MULTIPLIER, VP_BIN_COUNT
+    ATR_STOP_MULTIPLIER, VP_BIN_COUNT, GAP_THRESHOLD
 )
 
 
@@ -59,6 +59,116 @@ def calc_ema_signal(df: pd.DataFrame) -> dict:
         'ema_slow': round(curr_slow, 2),
         'trend': trend,
         'crossover': crossover,
+    }
+
+
+# ── Indicator: EMA 9 / 20 on 15-min bars ──────────────────────────────────────
+
+def calc_htf_trend(df_15m: pd.DataFrame) -> dict:
+    """
+    EMA 9/20 on the 15-min bar series. Returns trend direction only (no crossover).
+    Returns {'error': reason} if insufficient data.
+    """
+    min_bars = EMA_SLOW + 1
+    if len(df_15m) < min_bars:
+        return {'error': f'Need at least {min_bars} 15m bars for HTF EMA. Only {len(df_15m)} available.'}
+
+    ema_fast = _ema(df_15m['close'], EMA_FAST)
+    ema_slow = _ema(df_15m['close'], EMA_SLOW)
+
+    curr_fast = ema_fast.iloc[-1]
+    curr_slow = ema_slow.iloc[-1]
+
+    return {
+        'trend':    'BULLISH' if curr_fast > curr_slow else 'BEARISH',
+        'ema_fast': round(curr_fast, 2),
+        'ema_slow': round(curr_slow, 2),
+    }
+
+
+# ── Indicator: SPY Market Context ──────────────────────────────────────────────
+
+def calc_market_context(spy_df: pd.DataFrame) -> dict:
+    """
+    EMA 9/20 on SPY 5-min bars. Returns trend direction and current SPY price.
+    Returns {'error': reason} if insufficient data.
+    """
+    min_bars = EMA_SLOW + 1
+    if len(spy_df) < min_bars:
+        return {'error': f'Need at least {min_bars} bars for SPY EMA. Only {len(spy_df)} available.'}
+
+    ema_fast = _ema(spy_df['close'], EMA_FAST)
+    ema_slow = _ema(spy_df['close'], EMA_SLOW)
+
+    curr_fast = ema_fast.iloc[-1]
+    curr_slow = ema_slow.iloc[-1]
+
+    return {
+        'trend':     'BULLISH' if curr_fast > curr_slow else 'BEARISH',
+        'spy_price': round(float(spy_df['close'].iloc[-1]), 2),
+        'ema_fast':  round(curr_fast, 2),
+        'ema_slow':  round(curr_slow, 2),
+    }
+
+
+# ── Indicator: Volume Conviction ───────────────────────────────────────────────
+
+def calc_volume_context(df: pd.DataFrame, avg_daily_vol: float) -> dict:
+    """
+    Compares cumulative session volume against the expected volume given how much of
+    the trading day has elapsed (len(df) bars x 5 min / 390 min).
+    Returns {'status': 'HIGH'|'NORMAL'|'LOW', 'session_vol', 'expected_vol'}.
+    Returns {'error': reason} if inputs are invalid.
+    """
+    if len(df) < 1:
+        return {'error': 'No bars available for volume context.'}
+    if avg_daily_vol <= 0:
+        return {'error': 'Invalid average daily volume — must be > 0.'}
+
+    session_vol  = float(df['volume'].sum())
+    elapsed_min  = len(df) * 5
+    expected_vol = avg_daily_vol * (elapsed_min / 390)
+
+    if session_vol > expected_vol * 100:
+        status = 'HIGH'
+    elif session_vol < expected_vol * 10:
+        status = 'LOW'
+    else:
+        status = 'NORMAL'
+
+    return {
+        'status':       status,
+        'session_vol':  round(session_vol),
+        'expected_vol': round(expected_vol),
+    }
+
+
+# ── Indicator: Gap Detection ───────────────────────────────────────────────────
+
+def calc_gap(df: pd.DataFrame, prev_close: float) -> dict:
+    """
+    Computes the overnight gap as (today_open - prev_close) / prev_close.
+    Direction is UP, DOWN, or NONE (gap smaller than GAP_THRESHOLD).
+    Returns {'error': reason} if inputs are invalid.
+    """
+    if len(df) < 1:
+        return {'error': 'No bars for gap calculation.'}
+    if prev_close <= 0:
+        return {'error': 'Invalid previous close — must be > 0.'}
+
+    today_open = float(df.iloc[0]['open'])
+    gap_pct    = (today_open - prev_close) / prev_close
+
+    if gap_pct > GAP_THRESHOLD:
+        direction = 'UP'
+    elif gap_pct < -GAP_THRESHOLD:
+        direction = 'DOWN'
+    else:
+        direction = 'NONE'
+
+    return {
+        'gap_pct':   round(gap_pct, 4),
+        'direction': direction,
     }
 
 
