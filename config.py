@@ -19,3 +19,12 @@ RRR                  = 2.0   # Risk-reward ratio used to calculate target
 BAR_SIZE       = '5 mins'
 DATA_DURATION  = '1 D'
 VP_BIN_COUNT   = 50          # Number of price buckets for Volume Profile
+
+# ── Session & Streaming ────────────────────────────────────────────────────────
+HTF_BAR_SIZE      = '15 mins'
+SESSION_DURATION  = 3600        # seconds — auto-stop after 60 min
+
+# ── Market Context ─────────────────────────────────────────────────────────────
+MARKET_SYMBOL     = 'SPY'
+AVG_VOL_LOOKBACK  = '1 M'       # daily bars lookback for average volume
+GAP_THRESHOLD     = 0.005       # 0.5% — minimum gap size to score
