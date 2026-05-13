@@ -2,7 +2,7 @@ import sys
 import numpy as np
 import pandas as pd
 from ib_insync import IB, Stock, util
-from config import TWS_HOST, TWS_PORT, CLIENT_ID, BAR_SIZE, DATA_DURATION
+from config import TWS_HOST, TWS_PORT, CLIENT_ID, BAR_SIZE, DATA_DURATION, AVG_VOL_LOOKBACK
 
 # Fix Windows asyncio event loop policy (required for Python 3.10+ on Windows)
 if sys.platform == 'win32':
@@ -33,9 +33,9 @@ def connect_tws() -> IB:
         )
 
 
-def get_bars(ib: IB, symbol: str) -> pd.DataFrame:
+def get_bars(ib: IB, symbol: str, bar_size: str = BAR_SIZE) -> pd.DataFrame:
     """
-    Fetch today's intraday 5-min bars for the given symbol from TWS.
+    Fetch intraday bars for the given symbol from TWS.
     Returns a DataFrame with columns: date, open, high, low, close, volume.
     Raises ValueError if no data is returned.
     """
@@ -46,12 +46,12 @@ def get_bars(ib: IB, symbol: str) -> pd.DataFrame:
         contract,
         endDateTime='',
         durationStr=DATA_DURATION,
-        barSizeSetting=BAR_SIZE,
+        barSizeSetting=bar_size,
         whatToShow='TRADES',
         useRTH=True,
         formatDate=1,
     )
-    ib.sleep(1)  # Allow event loop to process the response
+    ib.sleep(1)
 
     if not bars:
         raise ValueError(
@@ -61,11 +61,8 @@ def get_bars(ib: IB, symbol: str) -> pd.DataFrame:
 
     df = util.df(bars)[['date', 'open', 'high', 'low', 'close', 'volume']].copy()
     df = df.reset_index(drop=True)
-
-    # Ensure numeric types
     for col in ['open', 'high', 'low', 'close', 'volume']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-
     df = df.dropna(subset=['close'])
     return df
 
@@ -89,3 +86,38 @@ def get_current_price(ib: IB, symbol: str, bars_df: pd.DataFrame) -> float:
 
     ib.cancelMktData(contract)
     return float(price)
+
+
+def get_daily_context(ib: IB, symbol: str) -> tuple:
+    """
+    Fetch daily bars going back AVG_VOL_LOOKBACK.
+    Returns (avg_daily_vol, prev_close) where prev_close is yesterday's closing price.
+    Raises ValueError if fewer than 2 daily bars are returned.
+    """
+    contract = Stock(symbol.upper(), 'SMART', 'USD')
+    ib.qualifyContracts(contract)
+
+    bars = ib.reqHistoricalData(
+        contract,
+        endDateTime='',
+        durationStr=AVG_VOL_LOOKBACK,
+        barSizeSetting='1 day',
+        whatToShow='TRADES',
+        useRTH=True,
+        formatDate=1,
+    )
+    ib.sleep(1)
+
+    df = util.df(bars)[['date', 'close', 'volume']].copy()
+    df['close']  = pd.to_numeric(df['close'],  errors='coerce')
+    df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
+    df = df.dropna()
+
+    if len(df) < 2:
+        raise ValueError(
+            f"Insufficient daily data for '{symbol.upper()}'. Need at least 2 trading days."
+        )
+
+    avg_daily_vol = float(df['volume'].mean())
+    prev_close    = float(df['close'].iloc[-2])
+    return avg_daily_vol, prev_close
